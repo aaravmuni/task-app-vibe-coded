@@ -24,17 +24,17 @@ class TaskWidget(QtWidgets.QFrame):
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setSpacing(6)
-        layout.setContentsMargins(8,8,8,8)
+        layout.setSpacing(8)
+        layout.setContentsMargins(10,10,10,10)
 
         top = QtWidgets.QHBoxLayout()
         top.setSpacing(6)
 
-        title = QtWidgets.QLabel(self.task.title)
-        title.setObjectName("title")
-        title.setProperty("class", "title")
-        title.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        top.addWidget(title)
+        # Title label
+        self.title_label = QtWidgets.QLabel(self.task.title)
+        self.title_label.setProperty("class", "title")
+        self.title_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        top.addWidget(self.title_label)
 
         top.addStretch()
 
@@ -52,59 +52,54 @@ class TaskWidget(QtWidgets.QFrame):
 
         layout.addLayout(top)
 
-        # Label chip + editable label name
+        # Label chip row
         label_row = QtWidgets.QHBoxLayout()
         label_row.setSpacing(8)
-        label = self.label_lookup.get(self.task.label_id, None)
-        if label:
-            chip = QtWidgets.QLabel(label.name)
-            chip.setStyleSheet(f"padding: 4px 8px; border-radius: 8px; background: {label.color}; color: white;")
-            label_row.addWidget(chip)
-        else:
-            chip = QtWidgets.QLabel("No Label")
-            chip.setObjectName("muted")
-            label_row.addWidget(chip)
+        self.chip = QtWidgets.QLabel()
+        self.chip.setContentsMargins(4,2,4,2)
+        self.chip.setStyleSheet("border-radius: 8px; padding: 4px 8px;")
+        label_row.addWidget(self.chip)
         label_row.addStretch()
         layout.addLayout(label_row)
 
-        # Progress bar with slider
+        # Progress row: progressbar + slider
         progress_row = QtWidgets.QHBoxLayout()
+        progress_row.setSpacing(8)
         self.progressbar = QtWidgets.QProgressBar()
         self.progressbar.setRange(0,100)
         self.progressbar.setValue(self.task.progress)
         self.progressbar.setTextVisible(True)
         self.progressbar.setFormat(f"{self.task.progress}%")
-        self.progressbar.setFixedHeight(12)
-        progress_row.addWidget(self.progressbar)
+        self.progressbar.setFixedHeight(16)
+        progress_row.addWidget(self.progressbar, 1)
 
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.slider.setRange(0,100)
         self.slider.setValue(self.task.progress)
-        self.slider.setFixedWidth(100)
+        self.slider.setFixedWidth(110)
         self.slider.valueChanged.connect(self._on_progress_change)
         progress_row.addWidget(self.slider)
         layout.addLayout(progress_row)
 
-        # Footer: small controls
+        # Footer with edit/delete
         footer = QtWidgets.QHBoxLayout()
-        footer.setSpacing(8)
         footer.addStretch()
-        # Edit title button
         self.btn_edit = QtWidgets.QPushButton("✎")
         self.btn_edit.setToolTip("Edit title")
         self.btn_edit.clicked.connect(self._edit_title)
         footer.addWidget(self.btn_edit)
-        # Delete
         self.btn_delete = QtWidgets.QPushButton("🗑")
         self.btn_delete.setToolTip("Delete task")
         footer.addWidget(self.btn_delete)
         layout.addLayout(footer)
 
-        # wire delete (outside caller will re-add callback)
+        # during build, style the chip and progressbar according to label
+        self.refresh_label(self.label_lookup)
+
+        # wire delete (external owner will override this attribute)
         self.btn_delete.clicked.connect(lambda: self.on_update_delete())
 
     def _move(self, direction: str):
-        """Compute target column and call on_move callback with updated task."""
         current_index = [c[0] for c in COLUMN_ORDER].index(self.task.column)
         if direction == "left" and current_index > 0:
             target = COLUMN_ORDER[current_index-1][0]
@@ -114,9 +109,6 @@ class TaskWidget(QtWidgets.QFrame):
             target = COLUMN_ORDER[current_index+1][0]
             self.task.column = target
             self.on_move(self.task, target)
-        else:
-            # nothing
-            pass
 
     def _on_progress_change(self, val: int):
         self.task.progress = int(val)
@@ -128,19 +120,47 @@ class TaskWidget(QtWidgets.QFrame):
         text, ok = QtWidgets.QInputDialog.getText(self, "Edit task title", "Title:", text=self.task.title)
         if ok and text.strip():
             self.task.title = text.strip()
-            # update displayed title
-            title_label = self.findChild(QtWidgets.QLabel)
-            # simpler: rebuild content or update first label
-            for child in self.findChildren(QtWidgets.QLabel):
-                if child.property("class") == "title":
-                    child.setText(self.task.title)
-                    break
+            self.title_label.setText(self.task.title)
             self.on_update(self.task)
+
+    def refresh_label(self, label_lookup: Dict[str, Label]):
+        """Update chip text/color and progressbar color according to the task's label."""
+        self.label_lookup = label_lookup
+        label = None
+        if self.task.label_id:
+            label = label_lookup.get(self.task.label_id)
+        if label:
+            self.chip.setText(label.name)
+            # text color: decide white or dark based on color brightness
+            text_color = "#ffffff"
+            self.chip.setStyleSheet(f"border-radius: 8px; padding: 4px 8px; background: {label.color}; color: {text_color};")
+            # style the progressbar chunk to match the label
+            self.progressbar.setStyleSheet(
+                f"QProgressBar {{ background-color: rgba(255,255,255,0.03); border-radius: 6px; height: 16px; }} "
+                f"QProgressBar::chunk {{ background: {label.color}; border-radius: 6px; }}"
+            )
+            # style the arrow buttons: hover outline using label color
+            btn_styles = (
+                "QPushButton {{ border-radius:6px; padding:6px; border:1px solid rgba(255,255,255,0.02); }} "
+                f"QPushButton:hover {{ outline: 2px solid {label.color}; background-color: rgba(255,255,255,0.02); }}"
+            )
+            self.btn_left.setStyleSheet(btn_styles)
+            self.btn_right.setStyleSheet(btn_styles)
+        else:
+            # no label - muted chip
+            self.chip.setText("No Label")
+            self.chip.setStyleSheet("border-radius: 8px; padding: 4px 8px; background: rgba(255,255,255,0.02); color: #cfd8dc;")
+            # default progress chunk
+            self.progressbar.setStyleSheet("")
+            # reset button style
+            base = "QPushButton {{ border-radius:6px; padding:6px; border:1px solid rgba(255,255,255,0.02); }} QPushButton:hover {{ background-color: rgba(255,255,255,0.02); }}"
+            self.btn_left.setStyleSheet(base)
+            self.btn_right.setStyleSheet(base)
 
     def on_update_delete(self):
         """A placeholder to be replaced by the owning ColumnWidget when the widget is created."""
-        # By default do nothing; owner should override attribute to delete task
         pass
+
 
 class ColumnWidget(QtWidgets.QFrame):
     """A column (TO-DO / IN PROGRESS / DONE) that holds TaskWidgets."""
@@ -150,7 +170,6 @@ class ColumnWidget(QtWidgets.QFrame):
         self.key = key
         self.title = title
         self.label_lookup = label_lookup
-        self.tasks: List[Task] = []
         self.task_widgets: Dict[str, TaskWidget] = {}
         self._build_ui()
 
@@ -177,8 +196,7 @@ class ColumnWidget(QtWidgets.QFrame):
         for w in list(self.task_widgets.values()):
             w.setParent(None)
         self.task_widgets.clear()
-        # add tasks
-        # keep insertion order
+        # add tasks in order
         for t in tasks:
             if t.column != self.key:
                 continue
@@ -189,37 +207,24 @@ class ColumnWidget(QtWidgets.QFrame):
                     on_delete(task_obj)
                 return _delete
             widget.on_update_delete = make_delete_fn(t)
-            # store and insert before the stretch
             self.task_widgets[t.id] = widget
             self.inner_layout.insertWidget(self.inner_layout.count()-1, widget)
-
-    def add_task_widget(self, task: Task, on_move, on_update, on_delete):
-        task.column = self.key
-        self.tasks.append(task)
-        widget = TaskWidget(task, self.label_lookup, on_move, on_update)
-        widget.on_update_delete = lambda: on_delete(task)
-        self.task_widgets[task.id] = widget
-        self.inner_layout.insertWidget(self.inner_layout.count()-1, widget)
 
     def refresh_labels(self, label_lookup: Dict[str, Label]):
         """If label colors/names changed, update chips inside each task widget."""
         self.label_lookup = label_lookup
         for w in self.task_widgets.values():
-            # rebuild the label part by simple approach: setParent and rebuild
-            w.label_lookup = label_lookup
-            # naive: remove and recreate widget text; simplest is to just update first label found
-            for child in w.findChildren(QtWidgets.QLabel):
-                if child.property("class") == "title":
-                    continue
-                # update the chip by searching for label id
-            # For simplicity, we won't fully reconstruct here. The app triggers full reload on label edits.
+            w.refresh_label(label_lookup)
+
 
 class LabelDialog(QtWidgets.QDialog):
-    """Dialog to add/edit labels."""
+    """Dialog to add/edit labels. Emits labelsChanged when any modification occurs."""
+    labelsChanged = QtCore.pyqtSignal()
+
     def __init__(self, labels: List[Label], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Manage Labels")
-        self.resize(400, 300)
+        self.resize(500, 360)
         self.labels = labels  # list reference; we will modify in-place
         self._build_ui()
 
@@ -275,13 +280,14 @@ class LabelDialog(QtWidgets.QDialog):
         if not name:
             QtWidgets.QMessageBox.warning(self, "Invalid", "Label name required.")
             return
-        # create new label
         from models import Label as LabelModel
         new_label = LabelModel.new(name, color or "#777777")
         self.labels.append(new_label)
         self.name_in.clear()
         self.color_in.clear()
         self._reload_list()
+        # inform listeners
+        self.labelsChanged.emit()
 
     def _edit_selected(self):
         sel = self.list_widget.currentItem()
@@ -296,6 +302,7 @@ class LabelDialog(QtWidgets.QDialog):
         lbl.name = name
         lbl.color = color
         self._reload_list()
+        self.labelsChanged.emit()
 
     def _delete_selected(self):
         sel = self.list_widget.currentItem()
@@ -304,3 +311,37 @@ class LabelDialog(QtWidgets.QDialog):
         lid = sel.data(QtCore.Qt.UserRole)
         self.labels[:] = [l for l in self.labels if l.id != lid]
         self._reload_list()
+        self.labelsChanged.emit()
+
+
+class LabelPickDialog(QtWidgets.QDialog):
+    """Simple dialog to pick a label; returns label.id or None for 'No label'."""
+    def __init__(self, labels: List[Label], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pick label")
+        self.resize(360, 120)
+        self.labels = labels
+        self.selected_id: Optional[str] = None
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        self.combo = QtWidgets.QComboBox()
+        self.combo.addItem("No label", userData=None)
+        for l in self.labels:
+            self.combo.addItem(l.name, userData=l.id)
+        layout.addWidget(self.combo)
+
+        btns = QtWidgets.QHBoxLayout()
+        ok = QtWidgets.QPushButton("OK")
+        ok.clicked.connect(self._ok)
+        cancel = QtWidgets.QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        btns.addStretch()
+        btns.addWidget(ok)
+        btns.addWidget(cancel)
+        layout.addLayout(btns)
+
+    def _ok(self):
+        self.selected_id = self.combo.currentData()
+        self.accept()
